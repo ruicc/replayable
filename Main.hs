@@ -111,12 +111,15 @@ instance Replayable (PlayT (RWST () () [PlayLog] IO)) where
 
 play :: R.StdGen -> Play a -> IO [PlayLog]
 play gen prog = do
-    (_, _, w) <- runRWST (unPlayT prog) () gen
-    return w
+    st <- getCurrentTime
+    (_, gen', w) <- runRWST (unPlayT prog) () gen
+    et <- getCurrentTime
+    return $ Init st gen : (w ++ [Final et gen'])
 
 replay :: [PlayLog] -> Replay a -> IO ()
 replay log prog = do
-    void $ runRWST (unPlayT prog) () log
+    let (Init t gen : rest) = log
+    void $ runRWST (unPlayT prog) () rest
 
 
 echo :: Replayable m => String -> m ()
@@ -124,23 +127,23 @@ echo = output . putStrLn
 
 getUsersHand :: Replayable m => m RPS
 getUsersHand = do
-    output $ putStr "Enter a Number (0=グー, 1=チョキ, 2=パー): "
+    output $ putStr "Enter a Number (1=Rock, 2=Paper, 3=Scissors): "
     userInput <- input getLine
     case userInput of
-        "0" -> return Rock
-        "1" -> return Paper
-        "2" -> return Scissors
+        "1" -> return Rock
+        "2" -> return Paper
+        "3" -> return Scissors
         _ -> do
             echo "You entered a wrong number."
             getUsersHand
 
 getNpcsHand :: Replayable m => m RPS
 getNpcsHand = do
-    hand :: Int <- randomR (0, 2)
+    hand :: Int <- randomR (1, 3)
     return $ case hand of
-        0 -> Rock
-        1 -> Paper
-        2 -> Scissors
+        1 -> Rock
+        2 -> Paper
+        3 -> Scissors
         _ -> error "Program is wrong"
 
 userWin :: RPS -> RPS -> Result
@@ -162,12 +165,18 @@ script = do
     echo "Let's play Rock-paper-scissors."
     result <- userWin <$> getUsersHand <*> getNpcsHand
     outputResult result
-
+    output $ putStr "Play again? [Y/n] :"
+    again <- input getLine
+    case again of
+        "n" -> echo "Quit."
+        _   -> script
 
 main :: IO ()
 main = do
     let gen = R.mkStdGen 12345
     log <- play gen script
+    putStrLn "-------- Log Dump ----------------"
+    print log
     putStrLn "-------- REPLAY ----------------"
     replay log script
 
