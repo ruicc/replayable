@@ -7,39 +7,28 @@ import Control.Monad.RWS
 import Control.Monad.Trans
 import Control.Applicative
 import Data.Time (getCurrentTime, UTCTime)
+import Data.Monoid (Endo)
 
 
 newtype PlayT m a = PlayT { unPlayT :: m a }
     deriving (Functor, Applicative, Monad, MonadIO)
 
-type Play a = PlayT (RWST () [PlayLog] R.StdGen IO) a
+type Play a = PlayT (RWST () [ActionLog] R.StdGen IO) a
 
-type Replay a = PlayT (RWST () () [PlayLog] IO) a
+type Replay a = PlayT (RWST () () [ActionLog] IO) a
 
 instance MonadTrans PlayT where
     lift = PlayT
 
-data PlayLog
-    = Init
-        { initTime :: UTCTime
-        , initSeed :: R.StdGen
-        }
-    | Input
-        { inputTime :: UTCTime
-        , inputValue :: String
-        }
-    | Output
-        { outputTime :: UTCTime
-        }
-    | RandomValue
-        { randomTime :: UTCTime
-        , randomSeed :: R.StdGen
-        }
-    | Final
-        { finalTime :: UTCTime
-        , finalSeed :: R.StdGen
-        }
+data ActionLog
+    = Init { time :: UTCTime , seed :: R.StdGen }
+    | Input { time :: UTCTime , inputValue :: String }
+    | Output { time :: UTCTime }
+    | RandomValue { time :: UTCTime , seed :: R.StdGen }
+    | Final { time :: UTCTime , seed :: R.StdGen }
     deriving (Show, Read)
+
+type PlayLog = Endo [ActionLog]
 
 data RPS = Rock | Paper | Scissors
 data Result = UserLose | Draw | UserWin
@@ -60,7 +49,7 @@ class (Functor m, Applicative m, Monad m) => Replayable m where
     output :: IO () -> m ()
 
 -- Play
-instance Replayable (PlayT (RWST () [PlayLog] R.StdGen IO)) where
+instance Replayable (PlayT (RWST () [ActionLog] R.StdGen IO)) where
     random = do
         gen <- lift get
         let (v, gen') = R.random gen
@@ -87,7 +76,7 @@ instance Replayable (PlayT (RWST () [PlayLog] R.StdGen IO)) where
         return v
 
 -- Replay
-instance Replayable (PlayT (RWST () () [PlayLog] IO)) where
+instance Replayable (PlayT (RWST () () [ActionLog] IO)) where
     random = do
         (RandomValue t gen : rest) <- lift get
         let (v, _) = R.random gen
@@ -109,14 +98,14 @@ instance Replayable (PlayT (RWST () () [PlayLog] IO)) where
         lift $ put rest
         return v
 
-play :: R.StdGen -> Play a -> IO [PlayLog]
+play :: R.StdGen -> Play a -> IO [ActionLog]
 play gen prog = do
     st <- getCurrentTime
     (_, gen', w) <- runRWST (unPlayT prog) () gen
     et <- getCurrentTime
     return $ Init st gen : (w ++ [Final et gen'])
 
-replay :: [PlayLog] -> Replay a -> IO ()
+replay :: [ActionLog] -> Replay a -> IO ()
 replay log prog = do
     let (Init t gen : rest) = log
     void $ runRWST (unPlayT prog) () rest
